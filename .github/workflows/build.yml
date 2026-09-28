@@ -21,8 +21,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: app/package-lock.json
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -90,8 +88,7 @@ jobs:
 
           A="android/app"
 
-          # Keep the Java package/namespace stable. APK Builder can replace
-          # the applicationId later without changing the MainActivity class path.
+          # Keep Java namespace stable so APK Builder can later replace applicationId.
           sed -i -E 's/namespace[[:space:]]*(=)?[[:space:]]*"com\.apkbuilder\.app00000000"/namespace = "app.shell"/' "$A/build.gradle"
           grep -q 'namespace = "app.shell"' "$A/build.gradle"
 
@@ -104,13 +101,12 @@ jobs:
           sed -i -E 's/^package[[:space:]]+[^;]+;/package app.shell;/' "$J/app/shell/MainActivity.java"
           rm -rf "$J/com"
 
-          # Keep a literal app label in the manifest so APK Builder can replace it.
+          # Keep a literal app label in the manifest for the APK Builder replacement flow.
           M="$A/src/main/AndroidManifest.xml"
           sed -i             -e 's#@string/app_name#APKB_LABEL_PLACEHOLDER_0000#g'             -e 's#@string/title_activity_main#APKB_LABEL_PLACEHOLDER_0000#g'             "$M"
           grep -q 'APKB_LABEL_PLACEHOLDER_0000' "$M"
 
-          # Keep targetSdk at 29 for compatibility with the template's
-          # legacy/v1-signing replacement flow.
+          # Keep targetSdk at 29 for compatibility with the legacy signing flow.
           V="android/variables.gradle"
           sed -i -E 's/targetSdkVersion[[:space:]]*=[[:space:]]*[0-9]+/targetSdkVersion = 29/' "$V"
           grep -q 'targetSdkVersion = 29' "$V"
@@ -135,7 +131,7 @@ jobs:
           path: app/template.apk
           if-no-files-found: error
 
-      # A push to main also runs this workflow automatically; workflow_dispatch remains available in GitHub Actions.\n      - name: Publish template APK in Release
+      - name: Publish template APK in Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: template-${{ github.run_number }}
