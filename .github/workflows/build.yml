@@ -135,7 +135,7 @@ jobs:
           path: app/template.apk
           if-no-files-found: error
 
-      - name: Publish template APK in Release
+      # A push to main also runs this workflow automatically; workflow_dispatch remains available in GitHub Actions.\n      - name: Publish template APK in Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: template-${{ github.run_number }}
