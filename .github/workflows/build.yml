@@ -1,0 +1,144 @@
+name: Build template APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Create Capacitor project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p app/www
+
+          cat > app/package.json <<'EOF'
+          {
+            "name": "apk-template",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/android": "^6.1.0",
+              "@capacitor/core": "^6.1.0"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "^6.1.0"
+            }
+          }
+          EOF
+
+          cat > app/capacitor.config.json <<'EOF'
+          {
+            "appId": "com.apkbuilder.app00000000",
+            "appName": "APKB_LABEL_PLACEHOLDER_0000",
+            "webDir": "www"
+          }
+          EOF
+
+          cat > app/www/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>template</title>
+          </head>
+          <body>
+            <p>template</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Install dependencies and add Android
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install
+          npx cap add android
+
+      - name: Patch Android template for APK Builder
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          A="android/app"
+
+          # Keep the Java package/namespace stable. APK Builder can replace
+          # the applicationId later without changing the MainActivity class path.
+          sed -i -E 's/namespace[[:space:]]*(=)?[[:space:]]*"com\.apkbuilder\.app00000000"/namespace = "app.shell"/' "$A/build.gradle"
+          grep -q 'namespace = "app.shell"' "$A/build.gradle"
+
+          J="$A/src/main/java"
+          F="$(find "$J" -type f -name 'MainActivity.java' | head -n 1)"
+          test -n "$F"
+
+          mkdir -p "$J/app/shell"
+          mv "$F" "$J/app/shell/MainActivity.java"
+          sed -i -E 's/^package[[:space:]]+[^;]+;/package app.shell;/' "$J/app/shell/MainActivity.java"
+          rm -rf "$J/com"
+
+          # Keep a literal app label in the manifest so APK Builder can replace it.
+          M="$A/src/main/AndroidManifest.xml"
+          sed -i             -e 's#@string/app_name#APKB_LABEL_PLACEHOLDER_0000#g'             -e 's#@string/title_activity_main#APKB_LABEL_PLACEHOLDER_0000#g'             "$M"
+          grep -q 'APKB_LABEL_PLACEHOLDER_0000' "$M"
+
+          # Keep targetSdk at 29 for compatibility with the template's
+          # legacy/v1-signing replacement flow.
+          V="android/variables.gradle"
+          sed -i -E 's/targetSdkVersion[[:space:]]*=[[:space:]]*[0-9]+/targetSdkVersion = 29/' "$V"
+          grep -q 'targetSdkVersion = 29' "$V"
+
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: app/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../template.apk
+          ls -lh ../template.apk
+
+      - name: Upload template APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: template-apk
+          path: app/template.apk
+          if-no-files-found: error
+
+      - name: Publish template APK in Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: template-${{ github.run_number }}
+          name: template.apk (build ${{ github.run_number }})
+          files: app/template.apk
+          fail_on_unmatched_files: true
